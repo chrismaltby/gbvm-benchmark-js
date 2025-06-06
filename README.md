@@ -4,7 +4,7 @@ Copyright (c) 2024 Chris Maltby, released under the [MIT license](https://openso
 
 A CLI tool for benchmarking and profiling games built with [GBVM](https://github.com/chrismaltby/gbvm) and, by extension, [GB Studio](https://github.com/chrismaltby/gb-studio).
 
-This tool simulates a ROM frame-by-frame, recording function call timings and generating a [Speedscope](https://www.speedscope.app)-compatible JSON trace. Optionally, it can capture screenshots per frame and generate a HTML report.
+This tool simulates a ROM frame-by-frame, recording function call timings and generating a [Speedscope](https://www.speedscope.app)-compatible JSON trace. Optionally, it can capture screenshots per frame and generate a HTML report (example in [examples/report](examples/report/index.html)).
 
 The emulation is handled by a modified version of [Gameboy.js
 ](https://github.com/juchi/gameboy.js/).
