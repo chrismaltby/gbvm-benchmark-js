@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node src/gbvm-benchmark.js"
   },
+  "bin": {
+    "gbvm-benchmark": "./src/gbvm-benchmark.js"
+  },
   "author": "Chris Maltby",
   "license": "MIT",
   "dependencies": {
