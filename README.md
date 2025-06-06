@@ -1,6 +1,6 @@
 # gbvm-benchmark
 
-Copyright (c) 2024 Chris Maltby, released under the [MIT license](https://opensource.org/licenses/MIT).
+Copyright (c) 2025 Chris Maltby, released under the [MIT license](https://opensource.org/licenses/MIT).
 
 A CLI tool for benchmarking and profiling games built with [GBVM](https://github.com/chrismaltby/gbvm) and, by extension, [GB Studio](https://github.com/chrismaltby/gb-studio).
 
