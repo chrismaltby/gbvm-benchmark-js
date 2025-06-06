@@ -1,0 +1,15 @@
+{
+  "name": "gbvm-benchmark",
+  "version": "1.0.0",
+  "description": "A CLI tool for benchmarking and profiling games built with GBVM",
+  "main": "index.js",
+  "scripts": {
+    "start": "node src/gbvm-benchmark.js"
+  },
+  "author": "Chris Maltby",
+  "license": "MIT",
+  "dependencies": {
+    "canvas": "^3.1.0",
+    "commander": "^14.0.0"
+  }
+}

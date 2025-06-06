@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GBVM Benchmark</title>
+    <script type="application/json" id="speedscope-data">
+      |SPEEDSCOPE_DATA|
+    </script>
+    <style type="text/css">
+      html,
+      body {
+        margin: 0;
+        font-family: "HelveticaNeue-Light", "Helvetica Neue Light",
+          "Helvetica Neue", Helvetica, Arial, "Lucida Grande", sans-serif;
+        overscroll-behavior-x: none;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      #frame {
+        background-color: #333;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        flex-shrink: 0;
+      }
+      #frame img {
+        width: 320px;
+        height: 288px;
+        background-color: #fff;
+        image-rendering: pixelated;
+      }
+      #timeline-scroll {
+        width: 100%;
+        overflow-x: scroll;
+        background-color: #222;
+        border-top: 1px solid #000;
+        flex-shrink: 0;
+      }
+      #timeline {
+        display: flex;
+        padding: 10px;
+      }
+      #timeline > button {
+        flex-shrink: 0;
+        border: 0;
+        padding: 0;
+        border: 5px solid black;
+        box-sizing: border-box;
+        margin-right: 5px;
+      }
+      #timeline > button:focus,
+      #timeline > button.focus {
+        outline: 4px solid #c92c61;
+        z-index: 1;
+      }
+      #frame-info {
+        flex-grow: 1;
+        background: #000;
+        display: flex;
+        flex-direction: column;
+      }
+      #frame-header {
+        display: flex;
+        padding: 10px;
+        margin: 0;
+        font-size: 14px;
+        font-weight: bold;
+        background-color: #444;
+        border-top: 1px solid #555;
+        border-bottom: 1px solid #222;
+        color: #eee;
+      }
+      #flame-graph-scroll {
+        width: 100%;
+        overflow-x: scroll;
+        flex-grow: 1;
+      }
+      #flame-graph {
+        position: relative;
+        width: 100%;
+        /* border-top: 1px solid blue; */
+      }
+      #flame-graph > div {
+        position: absolute;
+        border: 1px solid #000;
+        border-top: 0;
+        height: 30px;
+        box-sizing: border-box;
+        font-size: 10px;
+        padding: 2px;
+      }
+      #flame-graph > div:hover {
+        margin-top: -1px;
+        border: 1px solid #333;
+        outline: 1px solid #333;
+        cursor: pointer;
+      }
+      #flame-graph > div[data-title]:hover::after {
+        z-index: 1000;
+        display: inline-block;
+        content: attr(data-title);
+        position: sticky;
+        top: -100%;
+        left: 10px;
+        background-color: #fff;
+        outline: 2px solid #000;
+        font-family: monospace;
+        white-space: pre;
+        pointer-events: none;
+      }
+      #flame-graph > div > div {
+        display: inline-block;
+        position: sticky;
+        left: 0px;
+      }
+      .flex-grow {
+        flex-grow: 1;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="frame">
+      <img id="frame-img" href="about:blank" />
+    </div>
+    <div id="timeline-scroll">
+      <div id="timeline"></div>
+    </div>
+    <div id="frame-info">
+      <div id="frame-header">
+        Frame&nbsp;<span id="frame-num">X</span>
+        <div class="flex-grow"></div>
+        <input id="flame-graph-size" type="range" min="0" max="100" value="0" />
+      </div>
+      <div id="flame-graph-scroll">
+        <div id="flame-graph"></div>
+      </div>
+    </div>
+    <script>
+      const CYCLES_PER_FRAME = 70256;
+      const BAR_WIDTH = 10;
+
+      const data = JSON.parse(
+        document.getElementById("speedscope-data").textContent
+      );
+
+      const timelineEl = document.getElementById("timeline");
+      const frameImgEl = document.getElementById("frame-img");
+      const frameNumEl = document.getElementById("frame-num");
+      const flamegraphEl = document.getElementById("flame-graph");
+      const flamegraphSizeEl = document.getElementById("flame-graph-size");
+
+      let i = 0;
+      let currentFrame = -1;
+
+      const eventsBetween = (events, start, end) => {
+        const stack = {};
+        const activeEvents = [];
+
+        // Match O/C pairs and track unclosed events
+        for (const event of events) {
+          const { type, at, frame } = event;
+
+          if (type === "O") {
+            if (!stack[frame]) stack[frame] = [];
+            stack[frame].push(at);
+          } else if (type === "C") {
+            if (stack[frame] && stack[frame].length > 0) {
+              const startTime = stack[frame].pop();
+              activeEvents.push({ start: startTime, end: at, frame });
+            }
+          }
+        }
+
+        // Any remaining opens in the stack are ongoing
+        for (const [frame, times] of Object.entries(stack)) {
+          for (const startTime of times) {
+            activeEvents.push({
+              start: startTime,
+              end: Infinity,
+              frame: parseInt(frame, 10),
+            });
+          }
+        }
+
+        // Filter to those overlapping the [start, end] range
+        return activeEvents.filter((ev) => ev.end > start && ev.start < end);
+      };
+
+      const getFunctionColor = (name) => {
+        if (name === "_vsync") {
+          return "red";
+        }
+        let hash = 5381;
+        for (let i = 0; i < name.length; i++) {
+          hash = ((hash << 5) + hash) ^ name.charCodeAt(i); // hash * 33 ^ char
+        }
+        const hue = Math.abs(hash) % 360;
+        const saturation = 40; // %
+        const lightness = 85; // %
+        return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+      };
+
+      const setFrame = (frameIndex) => {
+        if (frameIndex === currentFrame) {
+          return;
+        }
+
+        const children = timelineEl.children;
+        if (!children.length) return;
+        const capture = data.captures[frameIndex];
+        if (!capture) return;
+
+        currentFrame = frameIndex;
+        const el = children[currentFrame];
+
+        // Reset focus ring from all frames in timeline
+        for (const child of children) {
+          child.className = "";
+        }
+
+        // Add focus to the selected frame
+        if (el) {
+          el.focus();
+          el.className = "focus";
+        }
+        frameImgEl.src = capture.src;
+
+        frameNumEl.innerHTML = currentFrame;
+
+        const frameStart = capture.at;
+        const frameEnd = data.captures[currentFrame + 1]?.at || Infinity;
+        const events = eventsBetween(
+          data.profiles[0].events,
+          frameStart,
+          frameEnd
+        );
+
+        flamegraphEl.innerHTML = "";
+
+        events.sort((a, b) => a.start - b.start);
+
+        let indent = 0;
+        let previousEvent;
+        let parentEventStack = [];
+        let maxIndent = 0;
+
+        for (const event of events) {
+          const eventFrame = data.shared.frames[event.frame];
+
+          const time =
+            Math.min(event.end, frameEnd) - Math.max(event.start, frameStart);
+          const timePercentage = 100 * (time / CYCLES_PER_FRAME);
+          const cycles = event.end - event.start;
+          const startTime = Math.max(event.start - frameStart, 0);
+          const startPercentage = 100 * (startTime / CYCLES_PER_FRAME);
+
+          if (previousEvent && event.start < previousEvent.end) {
+            indent++;
+            parentEventStack.push(previousEvent);
+          } else {
+            while (
+              parentEventStack.length > 0 &&
+              event.start >= parentEventStack[parentEventStack.length - 1].end
+            ) {
+              indent--;
+              parentEventStack.pop();
+            }
+          }
+
+          const childEvents = events.filter(
+            (childEvent) =>
+              childEvent.start >= event.start && childEvent.end <= event.end
+          );
+
+          const frameMap = new Map();
+
+          for (const e of childEvents) {
+            const frame = data.shared.frames[e.frame];
+            const name = frame.name;
+            const duration =
+              Math.min(e.end, frameEnd) - Math.max(e.start, frameStart);
+
+            if (!frameMap.has(name)) {
+              frameMap.set(name, { name, duration: 0 });
+            }
+
+            frameMap.get(name).duration += duration;
+          }
+
+          const frameStats = [...frameMap.values()].sort(
+            (a, b) => b.duration - a.duration
+          );
+
+          let title = `${eventFrame.name} : ${cycles} cycles\n`;
+
+          const longestSymbolLength = Math.max(
+            ...frameStats.map((event) => event.name.length)
+          );
+
+          for (const { name, duration } of frameStats) {
+            const clampedDuration = Math.min(duration, time);
+            const filledLength = Math.round(
+              (clampedDuration / time) * BAR_WIDTH
+            );
+            const bar = `|${"#".repeat(filledLength)}${"-".repeat(
+              BAR_WIDTH - filledLength
+            )}|`;
+            const paddedName = name.padEnd(longestSymbolLength);
+            const durStr = String(duration).padStart(8);
+            title += ` * ${paddedName} ${durStr} ${bar} \n`;
+          }
+
+          const eventEl = document.createElement("div");
+          eventEl.innerHTML = `<div><strong>${eventFrame.name}</strong><br />${cycles}</div>`;
+          eventEl.dataset.title = title;
+          eventEl.style.width = `${timePercentage}%`;
+          eventEl.style.minWidth = `${timePercentage}%`;
+          eventEl.style.left = `${startPercentage}%`;
+          eventEl.style.top = `${indent * 30}px`;
+          eventEl.style.background = getFunctionColor(eventFrame.name);
+
+          if (indent > maxIndent) {
+            maxIndent = indent;
+          }
+
+          flamegraphEl.appendChild(eventEl);
+          previousEvent = event;
+        }
+
+        flamegraphEl.style.height = `${(maxIndent + 10) * 30}px`;
+
+        window.location.hash = currentFrame;
+      };
+
+      for (const capture of data.captures) {
+        const captureEl = document.createElement("button");
+        captureEl.style.background = `url(${capture.src})`;
+        captureEl.style.backgroundSize = `cover`;
+        captureEl.style.backgroundPosition = `center`;
+        captureEl.style.width = `${160 / 2}px`;
+        captureEl.style.height = `${144 / 2}px`;
+        timelineEl.appendChild(captureEl);
+
+        captureEl.addEventListener(
+          "click",
+          ((i) => (event) => {
+            setFrame(i);
+          })(i)
+        );
+
+        i++;
+      }
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft") {
+          setFrame(Math.max(0, currentFrame - 1));
+          event.preventDefault();
+        } else if (event.key === "ArrowRight") {
+          setFrame(Math.min(data.captures.length - 1, currentFrame + 1));
+          event.preventDefault();
+        }
+      });
+
+      flamegraphSizeEl.addEventListener("input", (event) => {
+        const value = parseInt(event.currentTarget.value, 10);
+        flamegraphEl.style.width = `${100 + 19 * value}%`;
+      });
+
+      const jumpToHashFrame = () => {
+        const hashFrame = parseInt(window.location.hash.substring(1), 10);
+        if (hashFrame && !isNaN(hashFrame)) {
+          setFrame(hashFrame);
+          return true;
+        } else {
+          return false;
+        }
+      };
+
+      window.addEventListener("hashchange", jumpToHashFrame, false);
+
+      if (!jumpToHashFrame()) {
+        setFrame(data.captures.length - 1);
+      }
+    </script>
+  </body>
+</html>

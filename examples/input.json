@@ -1,0 +1,19 @@
+[
+  {
+    "frame": 0,
+    "press": ["RIGHT"]
+  },
+  {
+    "frame": 95,
+    "press": ["A", "B"]
+  },
+  {
+    "frame": 115,
+    "release": ["A", "B"]
+  },
+  {
+    "frame": 190,
+    "release": ["RIGHT"],
+    "press": ["LEFT"]
+  }
+]
