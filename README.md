@@ -27,6 +27,12 @@ Likely doesn't work for GBC-only games right now.
 > node src/gbvm-benchmark.js -r path/to/game.gb [options]
 ```
 
+Optionally you can run without installing using npx
+
+```bash
+> npx https://github.com/chrismaltby/gbvm-benchmark-js.git -r path/to/game.gb [options]
+```
+
 ### Required
 
 - `-r, --rom <filename>`  
