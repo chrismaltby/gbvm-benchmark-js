@@ -43,7 +43,7 @@ const parseNoi = (text) => {
   const usedAddr = {};
 
   for (const line of lines) {
-    if (!/^DEF (_|\..*ISR|\.remove_|\.add_|\.mod|\.div)/.test(line)) continue;
+    if (!/^DEF (_|F|\..*ISR|\.remove_|\.add_|\.mod|\.div)/.test(line)) continue;
     if (/_REG/.test(line)) continue;
     if (/_rRAM/.test(line)) continue;
     if (/_rROM/.test(line)) continue;
@@ -61,9 +61,11 @@ const parseNoi = (text) => {
 
     const key = `b${bank}_${addr}`;
 
+    const symbolClean = symbol.replace(/^F([^$]+)\$/, "").replace(/\$.*/,"");
+
     if (!usedAddr[key]) {
       result.push({
-        symbol,
+        symbol: symbolClean,
         addr,
         bank,
       });
