@@ -129,6 +129,7 @@ const gb = new GameboyJS.Gameboy(canvas);
 const romData = fs.readFileSync(options.rom);
 let noiLookup = [];
 let functionRegions = [];
+let regionsByBank = {};
 let noiIndex = {};
 
 let currentFnRegion;
@@ -140,6 +141,14 @@ try {
   );
   noiLookup = parseNoi(noiData);
   functionRegions = generateFunctionRegions(noiLookup);
+
+  for (const region of functionRegions) {
+    if (!regionsByBank[region.bank]) {
+      regionsByBank[region.bank] = [];
+    }
+    regionsByBank[region.bank].push(region);
+  }
+
   for (let i = 0; i < noiLookup.length; i++) {
     noiIndex[noiLookup[i].symbol] = i;
   }
@@ -172,9 +181,20 @@ const speedscope = {
 };
 
 const getCurrentFunctionRegion = (pc, bank) => {
-  return functionRegions.find(
-    (fn) => (fn.bank === bank || fn.bank === 0) && pc >= fn.addr && pc <= fn.end
-  );
+  // Check if still within current function
+  if (currentFnRegion) {
+    const fn = currentFnRegion;
+    if (pc >= fn.addr && pc <= fn.end) {
+      if (pc < 0x4000 || fn.bank === bank) {
+        return fn;
+      }
+    }
+  }
+  // Search for new function region based on bank
+  const targetBank = pc < 0x4000 ? 0 : bank;
+  const bankRegions = regionsByBank[targetBank];
+  if (!bankRegions) return undefined;
+  return bankRegions.find((fn) => pc >= fn.addr && pc <= fn.end);
 };
 
 const getGBTime = () => {
@@ -189,6 +209,14 @@ const log = (...args) => {
 
 gb.cpu.onAfterInstruction = () => {
   const pc = gb.cpu.r.pc;
+
+  if (
+    // Interupts?
+    pc < 336
+  ) {
+    return;
+  }
+
   const bank = gb.cpu.memory.mbc.romBankNumber;
 
   const newFn = getCurrentFunctionRegion(pc, bank);
@@ -207,13 +235,6 @@ gb.cpu.onAfterInstruction = () => {
   //   pc,
   //   `(${pc.toString(16)})`
   // );
-
-  if (
-    // Interupts?
-    pc < 336
-  ) {
-    return;
-  }
 
   if (!newFn || newFn === currentFnRegion) {
     return;
