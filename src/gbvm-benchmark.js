@@ -407,7 +407,7 @@ const popFramesUntil = (fn) => {
 
     speedscope.profiles[0].events.push({
       type: "C",
-      at: clockNow,
+      at: Math.max(clockNow, poppedFn.clock),
       frame: noiIndex[poppedFn.symbol],
       start: poppedFn.clock,
     });
@@ -597,6 +597,8 @@ const main = async () => {
       .filter((e) => e.type === "C")
       .map((e) => e.at),
   );
+
+  speedscope.profiles[0].events.sort((a, b) => a.at - b.at);
 
   if (exportPath) {
     const speedscopePath = path.join(exportPath, "speedscope.json");
