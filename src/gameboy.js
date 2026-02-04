@@ -270,6 +270,9 @@ var GameboyJS;
   };
 
   CPU.prototype.isInterruptEnable = function (type) {
+    if (GameboyJS.DISABLED_INTERRUPTS.indexOf(type) !== -1) {
+      return;
+    }
     return GameboyJS.Util.readBit(this.memory.rb(0xffff), type) != 0;
   };
 
@@ -4850,5 +4853,7 @@ var GameboyJS;
 
   GameboyJS.Util = Util;
 })(GameboyJS || (GameboyJS = {}));
+
+GameboyJS.DISABLED_INTERRUPTS = [];
 
 module.exports = GameboyJS;

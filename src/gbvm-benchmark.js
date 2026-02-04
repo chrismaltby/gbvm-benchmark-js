@@ -18,7 +18,7 @@ program
     "-f, --frames <number>",
     "Number of frames to process",
     (value) => parseInt(value, 10),
-    60
+    60,
   )
   .option(
     "-c, --capture <mode>",
@@ -30,15 +30,58 @@ program
       }
       return value;
     },
-    "all"
+    "all",
+  )
+  .option(
+    "-d, --disable-interrupts <list>",
+    "Disable interrupts during benchmarking",
   )
   .option("-v, --verbose", "Enable verbose call trace output")
   .helpOption("-h, --help", "Display help for command")
   .parse(process.argv);
 
+const interrupts = [
+  {
+    addr: 0x40,
+    name: "VBL",
+    symbol: "[INTERRUPT] VBL",
+  },
+  {
+    addr: 0x48,
+    name: "LCD",
+    symbol: "[INTERRUPT] LCD",
+  },
+  {
+    addr: 0x50,
+    name: "TIM",
+    symbol: "[INTERRUPT] TIM",
+  },
+  {
+    addr: 0x58,
+    name: "SIO",
+    symbol: "[INTERRUPT] SIO",
+  },
+  {
+    addr: 0x60,
+    name: "JOY",
+    symbol: "[INTERRUPT] JOY",
+  },
+];
+
+const ignoreSymbols = [".add_VBL", ".add_int", "_display_off"];
+
 const parseNoi = (text) => {
   const lines = text.split("\n");
   const result = [];
+
+  for (var i = 0; i < interrupts.length; i++) {
+    const interrupt = interrupts[i];
+    result.push({
+      symbol: interrupt.symbol,
+      addr: interrupt.addr,
+      bank: 0,
+    });
+  }
 
   const usedAddr = {};
 
@@ -61,7 +104,7 @@ const parseNoi = (text) => {
 
     const key = `b${bank}_${addr}`;
 
-    const symbolClean = symbol.replace(/^F([^$]+)\$/, "").replace(/\$.*/,"");
+    const symbolClean = symbol.replace(/^F([^$]+)\$/, "").replace(/\$.*/, "");
 
     if (!usedAddr[key]) {
       result.push({
@@ -112,6 +155,18 @@ if (options.input) {
   options.inputData = inputJSON;
 }
 
+if (options.disableInterrupts) {
+  const disableList = options.disableInterrupts
+    .split(",")
+    .map((name) => name.trim().toUpperCase());
+  for (let i = 0; i < interrupts.length; i++) {
+    const interrupt = interrupts[i];
+    if (disableList.includes(interrupt.name)) {
+      GameboyJS.DISABLED_INTERRUPTS.push(i);
+    }
+  }
+}
+
 let exportPath = null;
 let capturePath = null;
 
@@ -139,7 +194,7 @@ let currentFnRegion;
 try {
   const noiData = fs.readFileSync(
     options.rom.replace(/\.(gbc|gb)/i, ".noi"),
-    "utf8"
+    "utf8",
   );
   noiLookup = parseNoi(noiData);
   functionRegions = generateFunctionRegions(noiLookup);
@@ -152,7 +207,7 @@ try {
   }
 
   for (let i = 0; i < noiLookup.length; i++) {
-    noiIndex[noiLookup[i].symbol] = i;
+    noiIndex[noiLookup[i].symbol] = i + interrupts.length;
   }
 } catch (e) {
   console.error("No .noi file found for ROM");
@@ -169,7 +224,10 @@ let interupted = false;
 const speedscope = {
   $schema: "https://www.speedscope.app/file-format-schema.json",
   shared: {
-    frames: noiLookup.map((f) => ({ name: f.symbol })),
+    frames: [].concat(
+      interrupts.map((f) => ({ name: f.symbol })),
+      noiLookup.map((f) => ({ name: f.symbol })),
+    ),
   },
   profiles: [
     {
@@ -214,41 +272,20 @@ const log = (...args) => {
 gb.cpu.onAfterInstruction = () => {
   const pc = gb.cpu.r.pc;
 
-  if (
-    // Interupts?
-    pc < 336
-  ) {
-    return;
-  }
-
   const bank = gb.cpu.memory.mbc.romBankNumber;
 
   const newFn = getCurrentFunctionRegion(pc, bank);
-
-  // log(
-  //   "-FN::",
-  //   newFn?.symbol,
-  //   bank,
-  //   "ADDR",
-  //   newFn?.addr,
-  //   `(${newFn?.addr.toString(16)})`,
-  //   "END",
-  //   newFn?.end,
-  //   `(${newFn?.end.toString(16)})`,
-  //   "PC",
-  //   pc,
-  //   `(${pc.toString(16)})`
-  // );
 
   if (!newFn || newFn === currentFnRegion) {
     return;
   }
 
+  if (ignoreSymbols.includes(newFn.symbol)) {
+    return;
+  }
+
   // Entering a new function at its start
   if (newFn && pc === newFn.addr) {
-    if (interupted) {
-      return;
-    }
     pushFrame(newFn);
     currentFnRegion = newFn;
     return;
@@ -263,7 +300,11 @@ gb.cpu.onAfterInstruction = () => {
       if (interupted) {
         return;
       }
-      pushFrame(newFn);
+      if (pc >= 0x4000) {
+        // Needed to handle showing static functions when debugging is disabled
+        // While show wrong function name but better than nothing
+        pushFrame(newFn);
+      }
     }
     currentFnRegion = newFn;
     return;
@@ -274,13 +315,27 @@ gb.cpu.onAfterInstruction = () => {
 };
 
 gb.cpu.onInterrupt = (interrupt) => {
+  const clockNow = getGBTime();
+
   interupted = true;
-  //
+
+  fnStack.push({
+    symbol: interrupts[interrupt].symbol,
+    addr: interrupts[interrupt].addr,
+    clock: clockNow,
+    childPushed: false,
+    openPrinted: false,
+    indent: fnStack.length,
+  });
+
+  speedscope.profiles[0].events.push({
+    type: "O",
+    at: clockNow,
+    frame: noiIndex[interrupts[interrupt].symbol],
+  });
 };
 
 const pushFrame = (fn) => {
-  const isInterrupt = fn.symbol.startsWith("INT_");
-  const prefix = isInterrupt ? "[INT]" : "-";
   const clockNow = getGBTime();
 
   const parent = fnStack[fnStack.length - 1];
@@ -302,7 +357,6 @@ const pushFrame = (fn) => {
     childPushed: false,
     openPrinted: false,
     indent: fnStack.length,
-    prefix,
   });
 
   speedscope.profiles[0].events.push({
@@ -399,7 +453,7 @@ const logFrameReport = (start, end, frameIndex) => {
   log(
     "- FRAME",
     frameIndex,
-    "REPORT -------------------------------------------------------"
+    "REPORT -------------------------------------------------------",
   );
 
   const BAR_WIDTH = 30;
@@ -420,16 +474,16 @@ const logFrameReport = (start, end, frameIndex) => {
   }
 
   const frameStats = [...frameMap.values()].sort(
-    (a, b) => b.duration - a.duration
+    (a, b) => b.duration - a.duration,
   );
 
   for (const { name, duration } of frameStats) {
     const clampedDuration = Math.min(duration, CYCLES_PER_FRAME);
     const filledLength = Math.round(
-      (clampedDuration / CYCLES_PER_FRAME) * BAR_WIDTH
+      (clampedDuration / CYCLES_PER_FRAME) * BAR_WIDTH,
     );
     const bar = `|${"#".repeat(filledLength)}${"-".repeat(
-      BAR_WIDTH - filledLength
+      BAR_WIDTH - filledLength,
     )}| (${frameIndex})`;
     const paddedName = name.padEnd(longestSymbolLength);
     const durStr = String(duration).padStart(8);
@@ -437,7 +491,7 @@ const logFrameReport = (start, end, frameIndex) => {
   }
 
   log(
-    "---------------------------------------------------------------------------"
+    "---------------------------------------------------------------------------",
   );
 
   log("");
@@ -449,7 +503,7 @@ const main = async () => {
     log(
       "= FRAME",
       i,
-      "=================================================================="
+      "==================================================================",
     );
     log("");
     if (options.inputData) {
@@ -493,7 +547,7 @@ const main = async () => {
   speedscope.profiles[0].endValue = Math.max(
     ...speedscope.profiles[0].events
       .filter((e) => e.type === "C")
-      .map((e) => e.at)
+      .map((e) => e.at),
   );
 
   if (exportPath) {
