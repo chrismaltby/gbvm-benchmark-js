@@ -4,7 +4,8 @@
   "description": "A CLI tool for benchmarking and profiling games built with GBVM",
   "main": "index.js",
   "scripts": {
-    "start": "node src/gbvm-benchmark.js"
+    "start": "node src/gbvm-benchmark.js",
+    "build:example": "node src/gbvm-benchmark.js --rom ./examples/game.gb --input ./examples/input.json --export ./examples/report -f 120"
   },
   "bin": {
     "gbvm-benchmark": "./src/gbvm-benchmark.js"
