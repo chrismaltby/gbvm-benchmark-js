@@ -163,7 +163,9 @@
 
       let i = 0;
       let currentFrame = -1;
-      let showInterrupts = true;
+      let showInterrupts = localStorage.getItem("showInterrupts") === "true";
+
+      toggleInterruptsEl.checked = showInterrupts;
 
       const eventsBetween = (events, start, end) => {
         const stack = {};
@@ -486,6 +488,10 @@
 
       toggleInterruptsEl.addEventListener("change", (event) => {
         showInterrupts = event.currentTarget.checked;
+        localStorage.setItem(
+          "showInterrupts",
+          showInterrupts ? "true" : "false",
+        );
         refreshFrame();
       });
 
