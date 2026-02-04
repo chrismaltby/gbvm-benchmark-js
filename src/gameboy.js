@@ -161,7 +161,7 @@ var GameboyJS;
           var opcode = this.fetchOpcode();
           GameboyJS.opcodeMap[opcode](this);
           if (this.onAfterInstruction) {
-            this.onAfterInstruction();
+            this.onAfterInstruction(opcode);
           }
           this.r.F &= 0xf0; // tmp fix
 

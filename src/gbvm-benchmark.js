@@ -218,8 +218,7 @@ const longestSymbolLength = Math.max(...noiLookup.map((f) => f.symbol.length));
 let framesElapsed = 0;
 
 let fnStack = [];
-
-let interupted = false;
+let interruptStack = [];
 
 const speedscope = {
   $schema: "https://www.speedscope.app/file-format-schema.json",
@@ -266,8 +265,27 @@ const log = (...args) => {
   }
 };
 
-gb.cpu.onAfterInstruction = () => {
+const popInterrupts = () => {
+  if (interruptStack.length > 0) {
+    while (interruptStack.length > 0) {
+      const interrupted = interruptStack.pop();
+      if (interrupted) {
+        popFramesIncluding(interrupted);
+      }
+    }
+  }
+};
+
+const RETI = 0xd9;
+
+gb.cpu.onAfterInstruction = (opcode) => {
   const pc = gb.cpu.r.pc;
+
+  if (opcode === RETI) {
+    // Return from interrupt
+    popInterrupts();
+    return;
+  }
 
   const bank = gb.cpu.memory.mbc.romBankNumber;
 
@@ -291,10 +309,9 @@ gb.cpu.onAfterInstruction = () => {
   // Jumped to mid-function (if on stack already was probably a return)
   if (newFn && pc !== newFn.addr) {
     if (fnStackContains(newFn)) {
-      popFrame(newFn);
-      interupted = false;
+      popFramesUntil(newFn);
     } else {
-      if (interupted) {
+      if (interruptStack.length > 0) {
         return;
       }
       if (pc >= 0x4000) {
@@ -314,7 +331,9 @@ gb.cpu.onAfterInstruction = () => {
 gb.cpu.onInterrupt = (interrupt) => {
   const clockNow = getGBTime();
 
-  interupted = true;
+  popInterrupts();
+
+  interruptStack.push(interrupts[interrupt]);
 
   fnStack.push({
     symbol: interrupts[interrupt].symbol,
@@ -372,8 +391,12 @@ const fnStackContains = (searchFn) => {
   return false;
 };
 
-const popFrame = (fn) => {
+const popFramesUntil = (fn) => {
   const clockNow = getGBTime();
+
+  if (fn && !fnStackContains(fn)) {
+    return;
+  }
 
   while (
     fnStack.length > 0 &&
@@ -395,6 +418,34 @@ const popFrame = (fn) => {
       log(`${prefix}└- ${poppedFn.symbol} ${cycles}`);
     } else {
       log(`${prefix}└- ${poppedFn.symbol} ${cycles}`);
+    }
+  }
+};
+
+const popFramesIncluding = (fn) => {
+  const clockNow = getGBTime();
+
+  if (fn && !fnStackContains(fn)) {
+    return;
+  }
+
+  while (fnStack.length > 0) {
+    const poppedFn = fnStack.pop();
+    const cycles = clockNow - poppedFn.clock;
+
+    speedscope.profiles[0].events.push({
+      type: "C",
+      at: clockNow,
+      frame: noiIndex[poppedFn.symbol],
+      start: poppedFn.clock,
+    });
+
+    const prefix = "|   ".repeat(Math.max(0, poppedFn.indent));
+    log(`${prefix}└- ${poppedFn.symbol} ${cycles}`);
+
+    // Stop after popping the matching frame
+    if (poppedFn.symbol === fn?.symbol) {
+      break;
     }
   }
 };
@@ -540,7 +591,7 @@ const main = async () => {
     logFrameReport(frameStartTime, getGBTime(), framesElapsed - 1);
   }
 
-  popFrame();
+  popFramesUntil();
   speedscope.profiles[0].endValue = Math.max(
     ...speedscope.profiles[0].events
       .filter((e) => e.type === "C")
