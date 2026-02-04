@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
@@ -11,8 +11,9 @@
       html,
       body {
         margin: 0;
-        font-family: "HelveticaNeue-Light", "Helvetica Neue Light",
-          "Helvetica Neue", Helvetica, Arial, "Lucida Grande", sans-serif;
+        font-family:
+          "HelveticaNeue-Light", "Helvetica Neue Light", "Helvetica Neue",
+          Helvetica, Arial, "Lucida Grande", sans-serif;
         overscroll-behavior-x: none;
         display: flex;
         flex-direction: column;
@@ -143,7 +144,7 @@
       const BAR_WIDTH = 10;
 
       const data = JSON.parse(
-        document.getElementById("speedscope-data").textContent
+        document.getElementById("speedscope-data").textContent,
       );
 
       const timelineEl = document.getElementById("timeline");
@@ -235,7 +236,7 @@
         const events = eventsBetween(
           data.profiles[0].events,
           frameStart,
-          frameEnd
+          frameEnd,
         );
 
         flamegraphEl.innerHTML = "";
@@ -272,7 +273,7 @@
 
           const childEvents = events.filter(
             (childEvent) =>
-              childEvent.start >= event.start && childEvent.end <= event.end
+              childEvent.start >= event.start && childEvent.end <= event.end,
           );
 
           const frameMap = new Map();
@@ -291,22 +292,22 @@
           }
 
           const frameStats = [...frameMap.values()].sort(
-            (a, b) => b.duration - a.duration
+            (a, b) => b.duration - a.duration,
           );
 
           let title = `${eventFrame.name} : ${cycles} cycles\n`;
 
           const longestSymbolLength = Math.max(
-            ...frameStats.map((event) => event.name.length)
+            ...frameStats.map((event) => event.name.length),
           );
 
           for (const { name, duration } of frameStats) {
             const clampedDuration = Math.min(duration, time);
             const filledLength = Math.round(
-              (clampedDuration / time) * BAR_WIDTH
+              (clampedDuration / time) * BAR_WIDTH,
             );
             const bar = `|${"#".repeat(filledLength)}${"-".repeat(
-              BAR_WIDTH - filledLength
+              BAR_WIDTH - filledLength,
             )}|`;
             const paddedName = name.padEnd(longestSymbolLength);
             const durStr = String(duration).padStart(8);
@@ -348,7 +349,7 @@
           "click",
           ((i) => (event) => {
             setFrame(i);
-          })(i)
+          })(i),
         );
 
         i++;
