@@ -120,6 +120,9 @@
       .flex-grow {
         flex-grow: 1;
       }
+      label {
+        user-select: none;
+      }
     </style>
   </head>
   <body>
@@ -133,6 +136,8 @@
       <div id="frame-header">
         Frame&nbsp;<span id="frame-num">X</span>
         <div class="flex-grow"></div>
+        <label for="toggle-interrupts">Show Interrupts</label
+        ><input type="checkbox" id="toggle-interrupts" checked />&nbsp;
         <input id="flame-graph-size" type="range" min="0" max="100" value="0" />
       </div>
       <div id="flame-graph-scroll">
@@ -143,6 +148,8 @@
       const CYCLES_PER_FRAME = 70256;
       const BAR_WIDTH = 10;
 
+      const toMCycles = (cycles) => cycles / 4;
+
       const data = JSON.parse(
         document.getElementById("speedscope-data").textContent,
       );
@@ -152,9 +159,11 @@
       const frameNumEl = document.getElementById("frame-num");
       const flamegraphEl = document.getElementById("flame-graph");
       const flamegraphSizeEl = document.getElementById("flame-graph-size");
+      const toggleInterruptsEl = document.getElementById("toggle-interrupts");
 
       let i = 0;
       let currentFrame = -1;
+      let showInterrupts = true;
 
       const eventsBetween = (events, start, end) => {
         const stack = {};
@@ -204,6 +213,12 @@
         return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
       };
 
+      const refreshFrame = () => {
+        const frame = currentFrame;
+        currentFrame = -1;
+        setFrame(frame);
+      };
+
       const setFrame = (frameIndex) => {
         if (frameIndex === currentFrame) {
           return;
@@ -247,9 +262,21 @@
         let previousEvent;
         let parentEventStack = [];
         let maxIndent = 0;
+        let interruptUntil = 0;
 
         for (const event of events) {
           const eventFrame = data.shared.frames[event.frame];
+
+          if (!showInterrupts) {
+            if (event.start < interruptUntil) {
+              continue;
+            }
+
+            if (eventFrame.name.startsWith("[INTERRUPT]")) {
+              interruptUntil = event.end;
+              continue;
+            }
+          }
 
           const time =
             Math.min(event.end, frameEnd) - Math.max(event.start, frameStart);
@@ -276,6 +303,89 @@
               childEvent.start >= event.start && childEvent.end <= event.end,
           );
 
+          const interruptChildEvents = childEvents.filter((e) =>
+            data.shared.frames[e.frame].name.startsWith("[INTERRUPT]"),
+          );
+
+          const childEventsContainsInterrupt = childEvents.some((e) =>
+            data.shared.frames[e.frame].name.startsWith("[INTERRUPT]"),
+          );
+
+          if (childEventsContainsInterrupt) {
+            console.log({ childEvents, interruptChildEvents });
+          }
+
+          // Calculate merged interrupt time (handles overlapping interrupts)
+          const getMergedDuration = (events) => {
+            if (events.length === 0) return 0;
+
+            // Sort by start time
+            const sorted = [...events].sort((a, b) => a.start - b.start);
+            const merged = [];
+
+            for (const ev of sorted) {
+              const clampedStart = Math.max(ev.start, event.start);
+              const clampedEnd = Math.min(ev.end, event.end);
+
+              if (merged.length === 0) {
+                merged.push({ start: clampedStart, end: clampedEnd });
+              } else {
+                const last = merged[merged.length - 1];
+                if (clampedStart <= last.end) {
+                  // Overlapping - extend the last interval
+                  last.end = Math.max(last.end, clampedEnd);
+                } else {
+                  merged.push({ start: clampedStart, end: clampedEnd });
+                }
+              }
+            }
+
+            return merged.reduce(
+              (sum, interval) => sum + (interval.end - interval.start),
+              0,
+            );
+          };
+
+          // Calculate direct children time (immediate descendants only)
+          const getDirectChildrenDuration = (events, parentEvent) => {
+            // Filter to only direct children (not nested deeper)
+            const directChildren = events.filter((child) => {
+              if (child === parentEvent) return false;
+              if (
+                child.start < parentEvent.start ||
+                child.end > parentEvent.end
+              )
+                return false;
+
+              // Check if there's another event between this child and the parent
+              const hasIntermediateParent = events.some(
+                (other) =>
+                  other !== parentEvent &&
+                  other !== child &&
+                  other.start <= child.start &&
+                  other.end >= child.end &&
+                  other.start > parentEvent.start,
+              );
+
+              return !hasIntermediateParent;
+            });
+
+            return getMergedDuration(directChildren);
+          };
+
+          const INTERRUPT_OVERHEAD_CYCLES = 20;
+
+          const interruptedTime = getMergedDuration(interruptChildEvents);
+          const uninterruptedTime =
+            cycles -
+            interruptedTime -
+            interruptChildEvents.length * INTERRUPT_OVERHEAD_CYCLES;
+          const directChildrenTime = getDirectChildrenDuration(
+            childEvents,
+            event,
+          );
+          const selfTime = cycles - directChildrenTime;
+
           const frameMap = new Map();
 
           for (const e of childEvents) {
@@ -295,7 +405,11 @@
             (a, b) => b.duration - a.duration,
           );
 
-          let title = `${eventFrame.name} : ${cycles} cycles\n`;
+          let title = `${eventFrame.name}\n\n`;
+          title += `Uninterrupted: ${toMCycles(uninterruptedTime)} M-Cycles\n`;
+          title += `Total time : ${toMCycles(cycles)} M-Cycles\n`;
+          title += `Self time: ${toMCycles(selfTime)} M-Cycles\n`;
+          title += `\n`;
 
           const longestSymbolLength = Math.max(
             ...frameStats.map((event) => event.name.length),
@@ -310,12 +424,12 @@
               BAR_WIDTH - filledLength,
             )}|`;
             const paddedName = name.padEnd(longestSymbolLength);
-            const durStr = String(duration).padStart(8);
+            const durStr = String(toMCycles(duration)).padStart(8);
             title += ` * ${paddedName} ${durStr} ${bar} \n`;
           }
 
           const eventEl = document.createElement("div");
-          eventEl.innerHTML = `<div><strong>${eventFrame.name}</strong><br />${cycles}</div>`;
+          eventEl.innerHTML = `<div><strong>${eventFrame.name}</strong><br />${toMCycles(eventFrame.name === "_vsync" ? cycles : uninterruptedTime)}</div>`;
           eventEl.dataset.title = title;
           eventEl.style.width = `${timePercentage}%`;
           eventEl.style.minWidth = `${timePercentage}%`;
@@ -368,6 +482,11 @@
       flamegraphSizeEl.addEventListener("input", (event) => {
         const value = parseInt(event.currentTarget.value, 10);
         flamegraphEl.style.width = `${100 + 19 * value}%`;
+      });
+
+      toggleInterruptsEl.addEventListener("change", (event) => {
+        showInterrupts = event.currentTarget.checked;
+        refreshFrame();
       });
 
       const jumpToHashFrame = () => {
