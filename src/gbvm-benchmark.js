@@ -207,7 +207,7 @@ try {
   }
 
   for (let i = 0; i < noiLookup.length; i++) {
-    noiIndex[noiLookup[i].symbol] = i + interrupts.length;
+    noiIndex[noiLookup[i].symbol] = i;
   }
 } catch (e) {
   console.error("No .noi file found for ROM");
@@ -224,10 +224,7 @@ let interupted = false;
 const speedscope = {
   $schema: "https://www.speedscope.app/file-format-schema.json",
   shared: {
-    frames: [].concat(
-      interrupts.map((f) => ({ name: f.symbol })),
-      noiLookup.map((f) => ({ name: f.symbol })),
-    ),
+    frames: noiLookup.map((f) => ({ name: f.symbol })),
   },
   profiles: [
     {
