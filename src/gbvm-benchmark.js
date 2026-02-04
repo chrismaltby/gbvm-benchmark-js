@@ -164,6 +164,8 @@ let framesElapsed = 0;
 
 let fnStack = [];
 
+let interupted = false;
+
 const speedscope = {
   $schema: "https://www.speedscope.app/file-format-schema.json",
   shared: {
@@ -244,6 +246,9 @@ gb.cpu.onAfterInstruction = () => {
 
   // Entering a new function at its start
   if (newFn && pc === newFn.addr) {
+    if (interupted) {
+      return;
+    }
     pushFrame(newFn);
     currentFnRegion = newFn;
     return;
@@ -253,7 +258,11 @@ gb.cpu.onAfterInstruction = () => {
   if (newFn && pc !== newFn.addr) {
     if (fnStackContains(newFn)) {
       popFrame(newFn);
+      interupted = false;
     } else {
+      if (interupted) {
+        return;
+      }
       pushFrame(newFn);
     }
     currentFnRegion = newFn;
@@ -265,6 +274,7 @@ gb.cpu.onAfterInstruction = () => {
 };
 
 gb.cpu.onInterrupt = (interrupt) => {
+  interupted = true;
   //
 };
 
